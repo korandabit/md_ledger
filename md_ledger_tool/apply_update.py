@@ -55,8 +55,8 @@ def apply_update(row_id: str, new_text: str, db_path: str = None):
     path.write_text("\n".join(lines))
 
     # Update database to match
-    from datetime import datetime
-    update_ts = datetime.utcnow().isoformat()
+    from .main import get_utc_timestamp
+    update_ts = get_utc_timestamp()
 
     db.execute(
         "UPDATE ledger SET text=?, ingest_ts=?, status=? WHERE row_id=?",
