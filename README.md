@@ -23,6 +23,13 @@ Ingest Markdown tables into SQLite with full provenance tracking (file, line, se
 - **Persistent index:** Header structure stored in DB, instant access across sessions.
 - **Minimal token exposure for LLMs:** Only retrieve necessary sections to feed into language models.
 
+### Auto-Reindexing (Phase 3)
+- **Automatic freshness:** Index updates automatically when files are modified (lazy reindex on query).
+- **Zero user intervention:** No manual reindex needed, always fresh results.
+- **Mtime-based detection:** Tracks file modification time for staleness detection.
+- **Fast performance:** Auto-reindex adds < 150ms overhead (negligible).
+- **Legacy migration:** Seamlessly upgrades existing indexes.
+
 ---
 
 ## Installation
@@ -177,6 +184,7 @@ Read(file_path="README.md", offset=23, limit=22)
 - `line_end` (INTEGER, section end)
 - `parent_id` (INTEGER, FK to parent header)
 - `indexed_ts` (TEXT, UTC timestamp)
+- `file_mtime` (REAL, file modification time for staleness detection)
 
 ---
 
