@@ -8,14 +8,20 @@ Ingest Markdown tables into SQLite with full provenance tracking (file, line, se
 
 ## Features
 
+### Table Parsing (Phase 1)
 - **Targeted H2 ingestion:** Ingest only specific H2 sections from Markdown files.
 - **Full document ingestion:** Ingest all tables from a Markdown file.
 - **Provenance tracking:** Each row stores file name, line number, H2, ingestion timestamp, and status.
 - **Source file updates:** Modify ingested rows in the original Markdown using provenance data.
 - **Fail-fast validation:** Detects malformed rows to prevent silent errors.
-- **Persistent DB:** All ingested data is stored in `ledger.db` between sessions.
 - **Dynamic table configuration:** Automatically captures column count and line ranges for each H2.
-- **Minimal token exposure for LLMs:** Only retrieve necessary rows to feed into language models.
+
+### Header Navigation (Phase 2)
+- **Project-wide header indexing:** Scan all .md files and build searchable header tree (H1-H6).
+- **Targeted section reads:** Find sections by name, get exact line ranges for token-efficient reads.
+- **Hierarchy tracking:** Maintains parent-child relationships between headers.
+- **Persistent index:** Header structure stored in DB, instant access across sessions.
+- **Minimal token exposure for LLMs:** Only retrieve necessary sections to feed into language models.
 
 ---
 
@@ -104,11 +110,47 @@ apply_update(row_id='C171', new_text='Updated content here')
 - Fails fast if row_id, file, or line number is invalid
 - Returns exit code 1 on error (CLI), raises exception (Python)
 
+### Header navigation
+
+**Index markdown files:**
+```bash
+md-ledger index .                    # Index all .md in current directory
+md-ledger index . --recursive        # Scan subdirectories
+md-ledger index README.md            # Index single file
+```
+
+**Show header tree:**
+```bash
+md-ledger headers README.md
+# Output:
+# README.md:
+#   H1 "MD Ledger Tool" lines 2-177
+#     H2 "Features" lines 10-21
+#     H2 "Installation" lines 23-45
+```
+
+**Find sections:**
+```bash
+md-ledger find-section "Installation"
+# Output: README.md:23-45 (H2 "Installation")
+
+md-ledger find-section "use" --file CLAUDE.md
+# Search within specific file
+```
+
+**Integration with Read tool:**
+```python
+# After finding section: README.md:23-45
+# Use Claude Code's Read tool with offset/limit:
+Read(file_path="README.md", offset=23, limit=22)
+# Reads only the Installation section
+```
+
 ---
 
 ## Database Structure
 
-**ledger** table:
+**ledger** table (table rows):
 - `row_id` (TEXT PRIMARY KEY)
 - `h2` (TEXT)
 - `text` (TEXT)
@@ -119,12 +161,22 @@ apply_update(row_id='C171', new_text='Updated content here')
 - `status` (TEXT, default 'clean')
 - `ingest_ts` (TEXT, UTC timestamp)
 
-**table_config** table:
+**table_config** table (table metadata):
 - `file_name` (TEXT)
 - `h2` (TEXT)
 - `col_count` (INTEGER)
 - `line_start` (INTEGER)
 - `line_end` (INTEGER)
+
+**header_index** table (header structure):
+- `id` (INTEGER PRIMARY KEY)
+- `file` (TEXT)
+- `header_text` (TEXT)
+- `level` (INTEGER, 1-6 for H1-H6)
+- `line_start` (INTEGER, section start)
+- `line_end` (INTEGER, section end)
+- `parent_id` (INTEGER, FK to parent header)
+- `indexed_ts` (TEXT, UTC timestamp)
 
 ---
 

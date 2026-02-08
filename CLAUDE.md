@@ -6,6 +6,7 @@ This document outlines the core affordances of `md_ledger_tool`, expected behavi
 
 ## Tool Affordances
 
+### Phase 1: Table Parsing
 1. **Targeted ingestion:** Ingest only a specific H2 section from a Markdown file.
 2. **Full ingestion:** Ingest all tables from a Markdown file.
 3. **Querying:** Retrieve rows by H2 and type (`definition`, `hypothesis`, etc.).
@@ -13,9 +14,18 @@ This document outlines the core affordances of `md_ledger_tool`, expected behavi
 5. **Validation:** Detect malformed rows and skip them with error reporting.
 6. **Persistent storage:** All ingested data is stored in `ledger.db` for repeated access.
 
+### Phase 2: Header Navigation
+1. **Project-wide indexing:** Scan all .md files and build header tree (H1-H6).
+2. **Section queries:** Find sections by header text across all indexed files.
+3. **Line boundaries:** Get exact line ranges for targeted reads.
+4. **Hierarchy tracking:** Maintains parent-child relationships between headers.
+5. **Persistent index:** Header structure stored in DB for instant access.
+
 ---
 
 ## CLI Usage
+
+### Table Ingestion
 
 **Ingest a full Markdown file:**
 ```bash
@@ -26,6 +36,27 @@ md-ledger ingest example.md --full
 **Ingest a specific H2 section:**
 ```bash
 md-ledger ingest example.md --h2 constraints
+```
+
+### Header Navigation
+
+**Index markdown files:**
+```bash
+md-ledger index .                    # Current directory
+md-ledger index . --recursive        # Scan subdirectories
+md-ledger index README.md            # Single file
+```
+
+**Query header tree:**
+```bash
+md-ledger headers README.md
+# Shows: H1/H2/H3 structure with line ranges
+```
+
+**Find sections:**
+```bash
+md-ledger find-section "Installation"
+# Output: README.md:23-45 (H2 "Installation")
 ```
 
 **Querying from Python:**

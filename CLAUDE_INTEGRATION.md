@@ -12,9 +12,9 @@ When working with large Markdown files (hundreds or thousands of lines), using s
 - Makes targeted updates difficult
 
 `md_ledger_tool` solves this by:
-- Ingesting tables into SQLite with H2 section indexing
-- Enabling targeted queries by section and row type
-- Providing surgical updates with provenance tracking
+- **Phase 1:** Ingesting tables into SQLite with H2 section indexing and row-level queries
+- **Phase 2:** Indexing header structure (H1-H6) for targeted section reads
+- Enabling surgical updates with provenance tracking
 
 ---
 
@@ -34,11 +34,20 @@ wc -l file.md
 ```
 
 **If 50+ lines:**
-1. Ingest with md-ledger:
+1. **First, try header indexing** (works for any markdown):
+   ```bash
+   md-ledger index file.md
+   md-ledger find-section "Installation"
+   # Output: file.md:23-45
+   # Then: Read(file.md, offset=23, limit=22)
+   ```
+
+2. **For table-based files**, use table ingestion:
    ```bash
    md-ledger ingest file.md --full
    ```
-2. Tool reports tables found in output
+   Tool reports tables found in output
+
 3. **If tables found**, use md-ledger for all queries/updates:
 
    **Query example** (get all definitions from constraints section):
@@ -62,7 +71,7 @@ wc -l file.md
    apply_update(row_id='C171', new_text='Updated content here')
    ```
 
-4. **If no tables found**, fall back to Read tool
+4. **If no tables found**, header indexing provides navigation
 
 **If < 50 lines:** Use Read tool normally
 
