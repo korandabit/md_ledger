@@ -186,7 +186,7 @@ def incremental_reindex(db, file_path: str):
 **Success criteria:**
 - User queries always return fresh data
 - No manual reindex needed after file edits
-- Minimal performance overhead (< 100ms for typical files)
+- Minimal performance overhead
 
 ### Milestone 3: Watch Mode (Optional)
 
@@ -209,7 +209,7 @@ def incremental_reindex(db, file_path: str):
 3. Benchmark: Compare full vs incremental reindex times
 
 **Success criteria:**
-- 50%+ speedup on large file reindex
+- Measurable speedup on large file reindex
 - Correctness: Incremental produces same result as full reindex
 
 ---
@@ -252,19 +252,14 @@ ignore_patterns = node_modules/*,*.tmp
 
 ## Performance Considerations
 
-**Reindex cost:**
-- Small files (< 100 lines): ~10ms
-- Medium files (100-500 lines): ~50ms
-- Large files (500-1000 lines): ~200ms
-
 **Optimization strategies:**
 1. **Cache parsed headers in memory** (session-level cache)
 2. **Batch reindex** multiple files if many are stale
 3. **Parallel processing** for independent files (multiprocessing)
 
-**Acceptable overhead:**
-- Lazy reindex adds < 200ms to query latency (imperceptible to user)
-- Watch mode: < 1s from file save to reindex complete
+**Goal:**
+- Lazy reindex should add minimal latency to queries
+- Watch mode should reindex quickly after file save
 
 ---
 
@@ -289,12 +284,12 @@ md-ledger watch .
 ## Success Metrics
 
 **Correctness:**
-- Zero stale data served to queries (100% fresh)
+- Zero stale data served to queries (always fresh)
 - No false positives (unnecessary reindexing)
 
 **Performance:**
-- Lazy reindex overhead < 200ms (95th percentile)
-- Watch mode < 1s latency (file save → index updated)
+- Lazy reindex adds minimal overhead to queries
+- Watch mode reindexes quickly after file changes
 
 **Usability:**
 - Zero manual reindex commands in typical dev session
@@ -374,6 +369,6 @@ md-ledger watch .
 
 ## Summary
 
-Phase 3 transforms md-ledger from a **static snapshot tool** to a **live, self-maintaining index** that stays synchronized with file changes. Lazy reindex provides 90% of the value with minimal complexity; watch mode and incremental reindex are available for power users.
+Phase 3 transforms md-ledger from a **static snapshot tool** to a **live, self-maintaining index** that stays synchronized with file changes. Lazy reindex provides most of the value with minimal complexity; watch mode and incremental reindex are available for power users.
 
 **Core principle:** Index should "just work" without user thinking about freshness.

@@ -283,34 +283,30 @@ def create_header_index_table(db):
 - [ ] Query commands return correct line ranges
 - [ ] Integration with existing table parsing (no conflicts)
 - [ ] MEMORY.md protocol updated for header-aware reads
-- [ ] Tests achieve 90%+ coverage on new modules
+- [ ] Tests cover key functionality on new modules
 - [ ] Documentation complete and accurate
 
 ---
 
-## Token Savings Example
+## Workflow Comparison
 
 **Without header indexing:**
 ```
 User: "Update Installation section in README.md"
-1. Read README.md (300 lines) → 7.5k tokens
+1. Read entire README.md (or Grep + manual boundary calculation)
 2. Find section manually
 3. Edit
-Total: ~7.5k tokens
 ```
 
 **With header indexing:**
 ```
 User: "Update Installation section in README.md"
 1. Query: find-section "Installation" → README.md:20-43
-2. Read(README.md, offset=20, limit=23) → 575 tokens
+2. Read(README.md, offset=20, limit=23) → Only target section
 3. Edit
-Total: ~600 tokens (92% savings)
 ```
 
-**Per-session impact:**
-- 4 touches × 7k saved = **28k tokens saved per dev session**
-- Across 10 files × 5 sessions = **1.4M tokens saved per project**
+**Benefit:** Targeted reads avoid loading entire file, especially valuable for large docs and repeated accesses.
 
 ---
 
