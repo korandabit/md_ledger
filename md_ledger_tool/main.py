@@ -16,13 +16,18 @@ def get_utc_timestamp():
         return datetime.utcnow().isoformat()
 
 def open_db(db_path=None):
+    """
+    Open database and ensure schema is up to date.
+    Deprecated: Use init_db() instead.
+    """
     path = Path(db_path or DB_FILE).resolve()
     if not path.exists():
         raise FileNotFoundError(
             f"No ledger.db in current directory ({path.parent}). Run ingest first."
         )
     print(f"[md-ledger] using DB: {path}")
-    return sqlite3.connect(path)
+    # Use init_db to ensure migrations are applied
+    return init_db(str(path))
 
 
 def init_db(db_path=DB_FILE):
@@ -58,10 +63,19 @@ def init_db(db_path=DB_FILE):
         line_end INTEGER NOT NULL,
         parent_id INTEGER,
         indexed_ts TEXT NOT NULL,
+        file_mtime REAL,
         UNIQUE(file, line_start)
     )""")
     db.execute("CREATE INDEX IF NOT EXISTS idx_header_search ON header_index(header_text)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_header_file ON header_index(file)")
+
+    # Migration: Add file_mtime column if it doesn't exist
+    cursor = db.execute("PRAGMA table_info(header_index)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'file_mtime' not in columns:
+        db.execute("ALTER TABLE header_index ADD COLUMN file_mtime REAL")
+        db.commit()
+
     return db
 
 
@@ -227,6 +241,9 @@ def index_markdown_files(db, path, recursive=False):
 
     for file_path in files:
         try:
+            # Get file modification time
+            file_mtime = file_path.stat().st_mtime
+
             # Parse headers from file
             sections = parse_file_headers(str(file_path))
 
@@ -240,8 +257,8 @@ def index_markdown_files(db, path, recursive=False):
             # Insert header sections
             for section in sections:
                 db.execute("""
-                    INSERT INTO header_index (file, header_text, level, line_start, line_end, parent_id, indexed_ts)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO header_index (file, header_text, level, line_start, line_end, parent_id, indexed_ts, file_mtime)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     str(file_path.name),
                     section.text,
@@ -249,7 +266,8 @@ def index_markdown_files(db, path, recursive=False):
                     section.line_start,
                     section.line_end,
                     section.parent_id,
-                    indexed_ts
+                    indexed_ts,
+                    file_mtime
                 ))
 
             total_headers += len(sections)
@@ -263,12 +281,84 @@ def index_markdown_files(db, path, recursive=False):
     print(f"\nIndexed {len(files)} file(s), {total_headers} total headers")
 
 
+def is_file_stale(db, file_path):
+    """
+    Check if indexed file has been modified since last index.
+
+    Args:
+        db: Database connection
+        file_path: Path to file (can be Path object or string)
+
+    Returns:
+        True if file is stale (needs reindex), False if fresh, None if not indexed
+    """
+    path_obj = Path(file_path)
+
+    # Check if file exists
+    if not path_obj.exists():
+        return None  # File doesn't exist
+
+    # Get current file mtime
+    current_mtime = path_obj.stat().st_mtime
+
+    # Query stored mtime
+    row = db.execute("""
+        SELECT file_mtime FROM header_index
+        WHERE file = ?
+        LIMIT 1
+    """, (path_obj.name,)).fetchone()
+
+    if not row:
+        return None  # Not indexed
+
+    stored_mtime = row[0]
+
+    # If stored_mtime is None (legacy index), treat as stale
+    if stored_mtime is None:
+        return True
+
+    # File is stale if current mtime is newer than stored
+    return current_mtime > stored_mtime
+
+
+def reindex_file_if_stale(db, file_path):
+    """
+    Check if file is stale and reindex if needed.
+
+    Args:
+        db: Database connection
+        file_path: Path to file
+
+    Returns:
+        True if reindexed, False if already fresh
+    """
+    staleness = is_file_stale(db, file_path)
+
+    if staleness is None:
+        # Not indexed yet - index it
+        print(f"File not indexed, indexing {Path(file_path).name}...")
+        index_markdown_files(db, str(file_path), recursive=False)
+        return True
+    elif staleness:
+        # File is stale - reindex
+        print(f"File modified, reindexing {Path(file_path).name}...")
+        index_markdown_files(db, str(file_path), recursive=False)
+        return True
+    else:
+        # File is fresh
+        return False
+
+
 def query_headers(db, file):
     """
     Query header tree for a specific file.
+    Automatically reindexes if file has been modified.
 
     Returns list of tuples: (id, file, header_text, level, line_start, line_end, parent_id)
     """
+    # Lazy reindex if stale
+    reindex_file_if_stale(db, file)
+
     cur = db.execute("""
         SELECT id, file, header_text, level, line_start, line_end, parent_id
         FROM header_index
