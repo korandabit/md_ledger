@@ -417,6 +417,109 @@ def find_section(db, query_text, file=None):
     return cur.fetchall()
 
 
+def get_section_for_line(db, file, line_no):
+    """
+    Find which section a specific line belongs to.
+
+    Args:
+        db: Database connection
+        file: File name
+        line_no: Line number to locate
+
+    Returns:
+        Tuple of (header_text, level, line_start, line_end, header_path) or None
+        header_path is full hierarchy like "H1 Title > H2 Subsection"
+    """
+    # Find section containing this line
+    section = db.execute("""
+        SELECT id, header_text, level, line_start, line_end, parent_id
+        FROM header_index
+        WHERE file = ? AND line_start <= ? AND line_end >= ?
+        ORDER BY level DESC
+        LIMIT 1
+    """, (file, line_no, line_no)).fetchone()
+
+    if not section:
+        return None
+
+    section_id, header_text, level, line_start, line_end, parent_id = section
+
+    # Build header path (hierarchy)
+    path_parts = [header_text]
+    current_parent_id = parent_id
+
+    while current_parent_id is not None:
+        parent = db.execute("""
+            SELECT header_text, parent_id
+            FROM header_index
+            WHERE id = ?
+        """, (current_parent_id,)).fetchone()
+
+        if parent:
+            path_parts.insert(0, parent[0])
+            current_parent_id = parent[1]
+        else:
+            break
+
+    header_path = " > ".join(path_parts)
+
+    return (header_text, level, line_start, line_end, header_path)
+
+
+def find_content(db, search_text, file=None, context_lines=1):
+    """
+    Search for text in file content and return matches with section context.
+
+    Args:
+        db: Database connection
+        search_text: Text to search for
+        file: Optional file filter
+        context_lines: Lines of context before/after match
+
+    Returns:
+        List of tuples: (file, line_no, match_text, section_info)
+        section_info is (header_text, level, line_start, line_end, header_path)
+    """
+    from pathlib import Path
+
+    # Get list of indexed files
+    if file:
+        files = [file]
+    else:
+        files_query = db.execute("SELECT DISTINCT file FROM header_index").fetchall()
+        files = [row[0] for row in files_query]
+
+    results = []
+
+    for filename in files:
+        # Read file content
+        try:
+            path = Path(filename)
+            if not path.exists():
+                continue
+
+            lines = path.read_text(encoding='utf-8').splitlines()
+
+            # Search for matches
+            for line_no, line in enumerate(lines, start=1):
+                if search_text.lower() in line.lower():
+                    # Get context lines
+                    start_ctx = max(0, line_no - context_lines - 1)
+                    end_ctx = min(len(lines), line_no + context_lines)
+                    context = lines[start_ctx:end_ctx]
+                    match_text = "\n".join(context)
+
+                    # Get section info
+                    section_info = get_section_for_line(db, filename, line_no)
+
+                    results.append((filename, line_no, match_text, section_info))
+
+        except Exception as e:
+            continue
+
+    return results
+
+
 def main():
     # implicit ingest: md-ledger somefile.md
     if len(sys.argv) == 2 and not sys.argv[1].startswith("-"):
@@ -465,6 +568,12 @@ def main():
     find_p = subparsers.add_parser("find-section", help="Find section by header text")
     find_p.add_argument("query", help="Text to search for in header names")
     find_p.add_argument("--file", default=None, help="Limit search to specific file")
+
+    # ---------- find-content ----------
+    content_p = subparsers.add_parser("find-content", help="Find content with section context")
+    content_p.add_argument("query", help="Text to search for in file content")
+    content_p.add_argument("--file", default=None, help="Limit search to specific file")
+    content_p.add_argument("--context", "-C", type=int, default=1, help="Lines of context (default: 1)")
 
     args, unknown = parser.parse_known_args()
 
@@ -565,6 +674,40 @@ def main():
                 file, header_text, level, line_start, line_end = result
                 print(f"{file}:{line_start}-{line_end} (H{level} \"{header_text}\")")
 
+            return 0
+        except FileNotFoundError as e:
+            print(f"[ERROR] {e}")
+            return 1
+
+    # ---- FIND-CONTENT MODE ----
+    if args.command == "find-content":
+        try:
+            db = open_db(DB_FILE)
+            results = find_content(db, args.query, file=args.file, context_lines=args.context)
+
+            if not results:
+                print(f"No content found matching '{args.query}'")
+                return 0
+
+            for result in results:
+                filename, line_no, match_text, section_info = result
+
+                if section_info:
+                    header_text, level, line_start, line_end, header_path = section_info
+                    print(f"\n{filename}:{line_no}")
+                    print(f"  Section: {header_path}")
+                    print(f"  Range: lines {line_start}-{line_end}")
+                    print(f"  Context:")
+                    for line in match_text.split('\n'):
+                        print(f"    {line}")
+                else:
+                    print(f"\n{filename}:{line_no}")
+                    print(f"  Section: (not in any indexed section)")
+                    print(f"  Context:")
+                    for line in match_text.split('\n'):
+                        print(f"    {line}")
+
+            print(f"\nFound {len(results)} match(es)")
             return 0
         except FileNotFoundError as e:
             print(f"[ERROR] {e}")
