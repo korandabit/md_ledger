@@ -13,7 +13,7 @@ This tool provides token-efficient, structure-aware access to Markdown files thr
 - Content search with section context
 - Automatic index freshness (lazy reindex)
 - Persistent cross-session knowledge
-- Significant token savings (53-92% vs alternatives)
+- Significant token savings (targeted reads vs full file loads)
 
 ---
 
@@ -170,7 +170,7 @@ Working with .md file?
 ```bash
 md-ledger find-section "unreleased"  # 50 tokens
 Read(CHANGELOG.md, offset=5, limit=10)  # 120 tokens
-# Total: 170 tokens (97% savings)
+# Total: ~170 tokens vs ~5,000 for full read
 ```
 
 ### Example 2: Find All Pipeline Analysis
@@ -180,7 +180,7 @@ Read(CHANGELOG.md, offset=5, limit=10)  # 120 tokens
 md-ledger find-content "pipeline" --context 0  # 500 tokens
 Read(pipelines.md, offset=10, limit=15)  # 180 tokens
 Read(architecture.md, offset=80, limit=15)  # 180 tokens
-# Total: 860 tokens (99% savings)
+# Total: ~860 tokens vs ~97,000 for blind search
 ```
 
 ### Example 3: Multi-File Context
@@ -191,7 +191,7 @@ md-ledger find-section "pipeline"  # 150 tokens
 md-ledger headers pipelines.md  # 200 tokens
 Read(pipelines.md, offset=10, limit=15)  # 180 tokens
 Read(cli_pipeline.md, offset=15, limit=25)  # 300 tokens
-# Total: 830 tokens (78% savings)
+# Total: ~830 tokens vs ~3,700 for grep + full reads
 ```
 
 ---
@@ -404,7 +404,7 @@ File modified, reindexing README.md...
 - **Tables:** ingest + query + update
 - **Always:** Combine with Read(offset, limit) for efficiency
 
-**Token savings: 53-92% vs alternatives**
+**Token overhead: targeted reads only**
 **Time overhead: < 150ms (imperceptible)**
 **Maintenance: Zero (auto-reindex)**
 

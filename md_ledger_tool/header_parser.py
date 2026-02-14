@@ -41,7 +41,7 @@ def parse_headers(file_path: str) -> List[HeaderNode]:
     if not path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
 
-    lines = path.read_text(encoding='utf-8').splitlines()
+    lines = path.read_text(encoding='utf-8', errors='replace').splitlines()
     headers = []
     in_code_fence = False
 

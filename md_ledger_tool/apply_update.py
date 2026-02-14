@@ -33,7 +33,7 @@ def apply_update(row_id: str, new_text: str, db_path: str = None):
         db.close()
         raise FileNotFoundError(f"Markdown file '{file_name}' not found in {MD_DIR}")
 
-    lines = path.read_text().splitlines()
+    lines = path.read_text(encoding='utf-8', errors='replace').splitlines()
 
     if line_no > len(lines) or line_no < 1:
         db.close()
@@ -52,7 +52,7 @@ def apply_update(row_id: str, new_text: str, db_path: str = None):
     lines[line_no - 1] = " | ".join(parts)
 
     # Write back to markdown file
-    path.write_text("\n".join(lines))
+    path.write_text("\n".join(lines), encoding='utf-8')
 
     # Update database to match
     from .main import get_utc_timestamp

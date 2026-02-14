@@ -6,7 +6,7 @@ Token-efficient, structure-aware Markdown navigation and table management tool. 
 
 ## Why Use This?
 
-- **53-92% token savings** - Navigate directly to relevant sections instead of reading entire files
+- **Targeted token usage** - Navigate directly to relevant sections instead of reading entire files
 - **Structure-aware search** - Find content with full section hierarchy context
 - **Zero maintenance** - Auto-reindexes when files change (< 150ms overhead)
 - **Persistent knowledge** - Header index survives across sessions
@@ -64,7 +64,7 @@ md-ledger find-section "API Reference"
 # Read(file="ARCHITECTURE.md", offset=150, limit=50)
 ```
 
-**Token savings:** 89-99% vs reading full file
+**Token savings:** significant vs reading full file (exact ratio depends on file size and section size)
 
 ### Search Across Project
 
@@ -82,7 +82,7 @@ md-ledger find-content "authentication" --context 2
 md-ledger find-content "pipeline" --file architecture.md
 ```
 
-**Token savings:** 40-78% vs grep + multiple reads
+**Token savings:** significant vs grep + multiple reads (exact ratio depends on project scope)
 
 ### Manage Structured Table Data
 
@@ -269,6 +269,9 @@ This tool was developed in three phases:
 - Zero-maintenance automatic freshness
 
 Each phase built on the previous, resulting in a cohesive tool for markdown navigation and table management optimized for LLM workflows.
+
+**TODO: Measure actual token savings**
+Track real usage data to validate/replace illustrative estimates throughout docs. Instrument: (a) tokens consumed by md-ledger commands vs. (b) tokens that would have been consumed by equivalent full-file reads or grep-based searches. Suggested metric: proportion of file bytes read via targeted reads vs total file bytes available. See also: sister project `claude-stats-tools` for session-level token accounting.
 
 ---
 

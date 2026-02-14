@@ -4,7 +4,7 @@ C002 | Constructs enable systematic reasoning about complex domains | theory.md 
 
 
 ## constraints
-C171 | Constraints limit the solution space of a problem | design_patterns.md | definition
+C171 |  Constraints limit the solution space of a problem  | design_patterns.md | definition
 C172 | Well-defined constraints improve design outcomes | research_notes.md | hypothesis
 
 ## properties

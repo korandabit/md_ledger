@@ -94,7 +94,7 @@ def ingest_file(db, filename, target_h2=None, full_ingest=False):
             raise FileNotFoundError(f"{filename} not found in '{file_path}' or 'md/' subfolder.")
 
 
-    lines = md_path.read_text().splitlines()
+    lines = md_path.read_text(encoding='utf-8', errors='replace').splitlines()
 
     current_h2 = None
     header_rows = []
@@ -498,7 +498,7 @@ def find_content(db, search_text, file=None, context_lines=1):
             if not path.exists():
                 continue
 
-            lines = path.read_text(encoding='utf-8').splitlines()
+            lines = path.read_text(encoding='utf-8', errors='replace').splitlines()
 
             # Search for matches
             for line_no, line in enumerate(lines, start=1):
@@ -521,8 +521,9 @@ def find_content(db, search_text, file=None, context_lines=1):
 
 
 def main():
-    if hasattr(sys.stdout, 'reconfigure'):
-        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='replace')
     # implicit ingest: md-ledger somefile.md
     if len(sys.argv) == 2 and not sys.argv[1].startswith("-"):
         filename = sys.argv[1]
@@ -565,8 +566,8 @@ EXAMPLES:
   md-ledger update ROW_ID "new content here"
 
 TOKEN EFFICIENCY:
-  Provides 53-92% token savings vs. full file reads by enabling targeted
-  section access. Auto-reindexes on file modification (< 150ms overhead).
+  Enables targeted section access instead of full file reads.
+  Auto-reindexes on file modification (< 150ms overhead).
 
 WORKFLOW:
   1. Index project: md-ledger index . --recursive
