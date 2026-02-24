@@ -347,6 +347,9 @@ md-ledger find-content "authorization" --context 1
 
 ## Limitations & Fallbacks
 
+**Known limitation:**
+- **`update` only works for ingested table rows**: `update ROW_ID` requires prior `ingest`, and `ingest` only processes markdown tables (header row + `| --- |` separator). Pipe-delimited data lines that aren't proper markdown tables are never ingested → no ROW_IDs → `update` can't reach them. Fix: either (a) extend `ingest` to handle pipe-delimited non-table sections, or (b) ensure pipe-delimited data uses proper markdown table format.
+
 **md-ledger doesn't help when:**
 1. File < 50 lines → Just use Read
 2. Need full narrative flow → Read entire file

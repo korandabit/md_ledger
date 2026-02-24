@@ -197,7 +197,7 @@ def query_ledger(db, h2=None, type_filter=None):
 
     if h2:
         sql += " AND h2 = ?"
-        params.append(h2)
+        params.append(h2.lower())
 
     if type_filter:
         sql += " AND type = ?"
@@ -764,7 +764,7 @@ EXAMPLES:
 
     # ---- QUERY MODE ----
     if args.command == "query":
-        db = open_db()
+        db = open_db(args.dbfile)
         rows = query_ledger(db, h2=args.h2, type_filter=args.type_filter)
 
         if not rows:

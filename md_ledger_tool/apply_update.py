@@ -2,7 +2,6 @@ import sqlite3
 import pathlib
 
 DB_PATH = "ledger.db"
-MD_DIR = "md"
 
 
 def apply_update(row_id: str, new_text: str, db_path: str = None):
@@ -17,7 +16,10 @@ def apply_update(row_id: str, new_text: str, db_path: str = None):
         new_text: New text content for the row
         db_path: Path to ledger DB (default: ledger.db)
     """
-    db = sqlite3.connect(db_path or DB_PATH)
+    resolved_db_path = pathlib.Path(db_path or DB_PATH).resolve()
+    db_dir = resolved_db_path.parent
+
+    db = sqlite3.connect(str(resolved_db_path))
     row = db.execute(
         "SELECT file, line_no FROM ledger WHERE row_id=?",
         (row_id,),
@@ -28,10 +30,23 @@ def apply_update(row_id: str, new_text: str, db_path: str = None):
         raise ValueError(f"Row {row_id} not found in ledger.")
 
     file_name, line_no = row
-    path = pathlib.Path(MD_DIR) / file_name
-    if not path.exists():
+
+    # Resolve source file: try db directory first, then CWD, then legacy md/ subdir
+    for candidate in [
+        db_dir / file_name,
+        pathlib.Path(file_name),
+        db_dir / "md" / file_name,
+        pathlib.Path("md") / file_name,
+    ]:
+        if candidate.exists():
+            path = candidate
+            break
+    else:
         db.close()
-        raise FileNotFoundError(f"Markdown file '{file_name}' not found in {MD_DIR}")
+        raise FileNotFoundError(
+            f"Markdown file '{file_name}' not found. "
+            f"Searched: {db_dir / file_name}, {pathlib.Path(file_name).resolve()}"
+        )
 
     lines = path.read_text(encoding='utf-8', errors='replace').splitlines()
 
