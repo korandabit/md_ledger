@@ -681,7 +681,8 @@ def main():
         if hasattr(stream, 'reconfigure'):
             stream.reconfigure(encoding='utf-8', errors='replace')
     # implicit ingest: md-ledger somefile.md
-    if len(sys.argv) == 2 and not sys.argv[1].startswith("-"):
+    _SUBCOMMANDS = {"ingest", "query", "update", "index", "headers", "find-section", "find-content", "setup"}
+    if len(sys.argv) == 2 and not sys.argv[1].startswith("-") and sys.argv[1] not in _SUBCOMMANDS:
         filename = sys.argv[1]
         db = init_db(DB_FILE)
         ingest_file(db, filename)
