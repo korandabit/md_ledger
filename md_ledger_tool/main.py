@@ -7,6 +7,47 @@ import sys
 
 DB_FILE = "ledger.db"
 
+
+def _db_dir(db) -> Path:
+    """Return the directory that contains the DB file.
+
+    Derives the path from the live connection so nothing depends on CWD or
+    a global variable.  Falls back to CWD for in-memory DBs (tests).
+    """
+    row = db.execute("PRAGMA database_list").fetchone()
+    db_file = row[2] if row else ""
+    if not db_file or db_file == ":memory:":
+        return Path.cwd().resolve()
+    return Path(db_file).resolve().parent
+
+
+def _to_db_key(db, user_path) -> str:
+    """Convert any user-supplied path to the canonical DB-relative key.
+
+    This is the single value written to and read from ``header_index.file``.
+    Using a path relative to the DB directory (rather than a bare basename)
+    means:
+    - Same-named files in different subdirectories are distinguished.
+    - Lookups work regardless of the caller's CWD.
+    - The DB is portable as long as files stay within the project tree.
+
+    Forward slashes are used on all platforms so values are cross-platform
+    consistent.
+
+    Raises ValueError if the resolved path falls outside the DB directory.
+    """
+    db_dir = _db_dir(db)
+    resolved = Path(user_path).resolve()
+    try:
+        return resolved.relative_to(db_dir).as_posix()
+    except ValueError:
+        raise ValueError(
+            f"'{user_path}' resolves to '{resolved}', which is outside the "
+            f"ledger directory '{db_dir}'.  Only files within that tree can "
+            f"be tracked."
+        )
+
+
 def get_utc_timestamp():
     """Get UTC timestamp, handling deprecation of datetime.utcnow()."""
     try:
@@ -252,7 +293,8 @@ def index_markdown_files(db, path, recursive=False):
                 continue
 
             # Clear existing index for this file
-            db.execute("DELETE FROM header_index WHERE file = ?", (str(file_path.name),))
+            db_key = _to_db_key(db, file_path)
+            db.execute("DELETE FROM header_index WHERE file = ?", (db_key,))
 
             # Insert header sections
             for section in sections:
@@ -260,7 +302,7 @@ def index_markdown_files(db, path, recursive=False):
                     INSERT INTO header_index (file, header_text, level, line_start, line_end, parent_id, indexed_ts, file_mtime)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    str(file_path.name),
+                    db_key,
                     section.text,
                     section.level,
                     section.line_start,
@@ -301,12 +343,17 @@ def is_file_stale(db, file_path):
     # Get current file mtime
     current_mtime = path_obj.stat().st_mtime
 
-    # Query stored mtime
+    # Query stored mtime using the same key format used at index time
+    try:
+        db_key = _to_db_key(db, file_path)
+    except ValueError:
+        return None  # outside DB directory — treat as not indexed
+
     row = db.execute("""
         SELECT file_mtime FROM header_index
         WHERE file = ?
         LIMIT 1
-    """, (path_obj.name,)).fetchone()
+    """, (db_key,)).fetchone()
 
     if not row:
         return None  # Not indexed
@@ -331,10 +378,17 @@ def reindex_file_if_stale(db, file_path):
 
     Returns:
         True if reindexed, False if already fresh
+
+    Raises:
+        ValueError: if file_path is outside the DB directory (propagates from _to_db_key)
     """
     staleness = is_file_stale(db, file_path)
 
     if staleness is None:
+        # Validate the file is within the DB directory before attempting to index.
+        # Raises ValueError for cross-project paths — let it propagate so callers
+        # can surface a helpful error rather than printing confusing indexing output.
+        _to_db_key(db, file_path)
         # Not indexed yet - index it
         print(f"File not indexed, indexing {Path(file_path).name}...")
         index_markdown_files(db, str(file_path), recursive=False)
@@ -356,15 +410,16 @@ def query_headers(db, file):
 
     Returns list of tuples: (id, file, header_text, level, line_start, line_end, parent_id)
     """
-    # Lazy reindex if stale
+    # Lazy reindex if stale (uses the original path to locate the file on disk)
     reindex_file_if_stale(db, file)
 
+    db_key = _to_db_key(db, file)
     cur = db.execute("""
         SELECT id, file, header_text, level, line_start, line_end, parent_id
         FROM header_index
         WHERE file = ?
         ORDER BY line_start
-    """, (file,))
+    """, (db_key,))
     return cur.fetchall()
 
 
@@ -409,7 +464,7 @@ def find_section(db, query_text, file=None):
 
     if file:
         sql += " AND file = ?"
-        params.append(file)
+        params.append(_to_db_key(db, file))
 
     sql += " ORDER BY file, line_start"
 
@@ -482,19 +537,20 @@ def find_content(db, search_text, file=None, context_lines=1):
     """
     from pathlib import Path
 
-    # Get list of indexed files
+    # Get list of indexed files (stored as DB-relative keys)
     if file:
-        files = [file]
+        files = [_to_db_key(db, file)]
     else:
         files_query = db.execute("SELECT DISTINCT file FROM header_index").fetchall()
         files = [row[0] for row in files_query]
 
+    db_dir = _db_dir(db)
     results = []
 
     for filename in files:
-        # Read file content
+        # Resolve DB-relative key to an absolute path — no CWD dependency
         try:
-            path = Path(filename)
+            path = (db_dir / filename).resolve()
             if not path.exists():
                 continue
 
@@ -518,6 +574,106 @@ def find_content(db, search_text, file=None, context_lines=1):
             continue
 
     return results
+
+
+def _cross_project_error(file_path) -> str:
+    """Actionable error message when a file is outside the current project's ledger."""
+    p = Path(file_path)
+    parent_fp = str(p.parent).replace('\\', '/')
+    fp = str(p).replace('\\', '/')
+    db_fp = f"{parent_fp}/ledger.db"
+    return (
+        f"'{fp}' is outside this project's ledger directory.\n"
+        f"Index that location first:\n"
+        f"\n"
+        f"  md-ledger index {parent_fp} --db {db_fp}\n"
+        f"\n"
+        f"Then navigate with --db:\n"
+        f"\n"
+        f"  md-ledger headers {fp} --db {db_fp}\n"
+        f"  md-ledger find-section \"query\" --db {db_fp}\n"
+        f"  md-ledger find-content \"text\" --db {db_fp}"
+    )
+
+
+def _setup_claude_integration(hooks_dir=None, settings_path=None):
+    """
+    Install the md-ledger PreToolUse hook and register it in ~/.claude/settings.json.
+
+    Idempotent: skips steps that are already done.
+
+    Args:
+        hooks_dir:     Override ~/.claude/hooks (used in tests).
+        settings_path: Override ~/.claude/settings.json (used in tests).
+
+    Returns:
+        (installed, skipped) — lists of action strings.
+    """
+    import json as _json
+    import shutil
+
+    home = Path.home()
+    claude_dir = home / '.claude'
+
+    if hooks_dir is None:
+        hooks_dir = claude_dir / 'hooks'
+    if settings_path is None:
+        settings_path = claude_dir / 'settings.json'
+
+    installed = []
+    skipped = []
+
+    # ---- 1. Install hook script ----
+    src_hook = Path(__file__).parent / 'hooks' / 'md_ledger_guard.py'
+    dst_hook = Path(hooks_dir) / 'md_ledger_guard.py'
+
+    Path(hooks_dir).mkdir(parents=True, exist_ok=True)
+
+    if src_hook.exists():
+        shutil.copy2(src_hook, dst_hook)
+        installed.append(f"hook script  → {dst_hook}")
+    else:
+        skipped.append(f"hook source not found at {src_hook}")
+
+    # ---- 2. Register PreToolUse hook in settings.json ----
+    settings_path = Path(settings_path)
+    settings = {}
+    if settings_path.exists():
+        try:
+            settings = _json.loads(settings_path.read_text(encoding='utf-8'))
+        except _json.JSONDecodeError:
+            pass
+
+    hooks = settings.setdefault('hooks', {})
+    pre = hooks.setdefault('PreToolUse', [])
+
+    # Check if already registered by looking for md_ledger_guard in any command string
+    already = any(
+        'md_ledger_guard' in cmd_entry.get('command', '')
+        for block in pre
+        if isinstance(block, dict)
+        for cmd_entry in block.get('hooks', [])
+        if isinstance(cmd_entry, dict)
+    )
+
+    if not already:
+        hook_cmd = f"python {dst_hook}"
+        pre.append({
+            "matcher": "Read|Bash",
+            "hooks": [{
+                "type": "command",
+                "command": hook_cmd,
+                "timeout": 10,
+                "statusMessage": "Checking md-ledger guard...",
+            }],
+        })
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(_json.dumps(settings, indent=2), encoding='utf-8')
+        installed.append(f"PreToolUse hook → {settings_path}")
+    else:
+        skipped.append("PreToolUse hook already registered")
+
+    return installed, skipped
 
 
 def main():
@@ -663,6 +819,8 @@ EXAMPLES:
                         help="File or directory path to index")
     index_p.add_argument("--recursive", "-r", action="store_true",
                         help="Recursively scan subdirectories for .md files")
+    index_p.add_argument("--db", default=DB_FILE, metavar="PATH",
+                        help=f"Path to ledger database (default: {DB_FILE})")
 
     # ---------- headers ----------
     headers_p = subparsers.add_parser(
@@ -687,6 +845,8 @@ EXAMPLE:
     )
     headers_p.add_argument("file", metavar="FILE",
                           help="Markdown file to display headers for")
+    headers_p.add_argument("--db", default=DB_FILE, metavar="PATH",
+                          help=f"Path to ledger database (default: {DB_FILE})")
 
     # ---------- find-section ----------
     find_p = subparsers.add_parser(
@@ -716,6 +876,8 @@ EXAMPLES:
                        help="Text to search for in header names (case-insensitive)")
     find_p.add_argument("--file", default=None, metavar="FILE",
                        help="Limit search to specific file")
+    find_p.add_argument("--db", default=DB_FILE, metavar="PATH",
+                       help=f"Path to ledger database (default: {DB_FILE})")
 
     # ---------- find-content ----------
     content_p = subparsers.add_parser(
@@ -751,6 +913,25 @@ EXAMPLES:
                           help="Limit search to specific file")
     content_p.add_argument("--context", "-C", type=int, default=1, metavar="N",
                           help="Number of context lines before/after match (default: 1)")
+    content_p.add_argument("--db", default=DB_FILE, metavar="PATH",
+                          help=f"Path to ledger database (default: {DB_FILE})")
+
+    # ---------- setup ----------
+    subparsers.add_parser(
+        "setup",
+        help="Install the md-ledger Claude Code hook and register it in ~/.claude/settings.json",
+        description="""
+Install the PreToolUse hook that enforces the md-ledger navigation workflow in
+Claude Code sessions.
+
+What this does:
+  1. Copies md_ledger_guard.py to ~/.claude/hooks/
+  2. Registers a PreToolUse entry in ~/.claude/settings.json
+
+Idempotent: safe to run multiple times.
+        """.strip(),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
 
     args, unknown = parser.parse_known_args()
 
@@ -815,7 +996,7 @@ EXAMPLES:
 
     # ---- INDEX MODE ----
     if args.command == "index":
-        db = init_db(DB_FILE)
+        db = init_db(args.db)
         try:
             index_markdown_files(db, args.path, recursive=args.recursive)
             return 0
@@ -829,10 +1010,13 @@ EXAMPLES:
     # ---- HEADERS MODE ----
     if args.command == "headers":
         try:
-            db = open_db(DB_FILE)
+            db = open_db(args.db)
             headers = query_headers(db, args.file)
             print_header_tree(headers)
             return 0
+        except ValueError as e:
+            print(f"[ERROR] {_cross_project_error(args.file)}")
+            return 1
         except FileNotFoundError as e:
             print(f"[ERROR] {e}")
             return 1
@@ -840,7 +1024,7 @@ EXAMPLES:
     # ---- FIND-SECTION MODE ----
     if args.command == "find-section":
         try:
-            db = open_db(DB_FILE)
+            db = open_db(args.db)
             results = find_section(db, args.query, file=args.file)
 
             if not results:
@@ -852,14 +1036,32 @@ EXAMPLES:
                 print(f"{file}:{line_start}-{line_end} (H{level} \"{header_text}\")")
 
             return 0
+        except ValueError:
+            print(f"[ERROR] {_cross_project_error(args.file)}")
+            return 1
         except FileNotFoundError as e:
             print(f"[ERROR] {e}")
             return 1
 
+    # ---- SETUP MODE ----
+    if args.command == "setup":
+        installed, skipped = _setup_claude_integration()
+        if installed:
+            print("Installed:")
+            for item in installed:
+                print(f"  {item}")
+        if skipped:
+            print("Skipped:")
+            for item in skipped:
+                print(f"  {item}")
+        print("\nNext: add the md-ledger workflow block to ~/.claude/CLAUDE.md")
+        print("See CLAUDE.md in the md-ledger project for the recommended content.")
+        return 0
+
     # ---- FIND-CONTENT MODE ----
     if args.command == "find-content":
         try:
-            db = open_db(DB_FILE)
+            db = open_db(args.db)
             results = find_content(db, args.query, file=args.file, context_lines=args.context)
 
             if not results:
@@ -886,10 +1088,12 @@ EXAMPLES:
 
             print(f"\nFound {len(results)} match(es)")
             return 0
+        except ValueError:
+            print(f"[ERROR] {_cross_project_error(args.file)}")
+            return 1
         except FileNotFoundError as e:
             print(f"[ERROR] {e}")
             return 1
-
 
 
 if __name__ == "__main__":
