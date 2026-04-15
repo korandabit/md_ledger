@@ -657,7 +657,9 @@ def _setup_claude_integration(hooks_dir=None, settings_path=None):
     )
 
     if not already:
-        hook_cmd = f"python {dst_hook}"
+        # Use portable ~-path so the command works cross-machine via Dropbox sync.
+        # Append "|| exit 0" so a missing/crashed script never blocks tool access.
+        hook_cmd = "python ~/.claude/hooks/md_ledger_guard.py || exit 0"
         pre.append({
             "matcher": "Read|Bash",
             "hooks": [{

@@ -68,6 +68,31 @@ class TestSetupCommand:
         ]
         assert any("md_ledger_guard" in c for c in commands)
 
+    def test_setup_uses_portable_hook_command(self, tmp_path):
+        """setup must write a portable ~/.claude/… command, not a machine-specific absolute path."""
+        hooks_dir = tmp_path / "hooks"
+        settings_path = tmp_path / "settings.json"
+
+        from md_ledger_tool.main import _setup_claude_integration
+        _setup_claude_integration(hooks_dir=hooks_dir, settings_path=settings_path)
+
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        pre = settings.get("hooks", {}).get("PreToolUse", [])
+        commands = [
+            cmd_entry.get("command", "")
+            for block in pre
+            for cmd_entry in block.get("hooks", [])
+            if "md_ledger_guard" in cmd_entry.get("command", "")
+        ]
+        assert commands, "No guard command found"
+        for cmd in commands:
+            assert cmd.startswith("python ~/.claude/"), (
+                f"Hook command must use portable ~/.claude/ path, got: {cmd!r}"
+            )
+            assert "|| exit 0" in cmd, (
+                f"Hook command must include '|| exit 0' for resilience, got: {cmd!r}"
+            )
+
     def test_setup_is_idempotent(self, tmp_path):
         """Running setup twice must not duplicate the hook registration."""
         hooks_dir = tmp_path / "hooks"

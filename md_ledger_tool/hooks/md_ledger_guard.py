@@ -247,7 +247,8 @@ def check_bash(tool_input: dict) -> None:
 def main() -> None:
     try:
         data = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
+    except Exception:
+        # Malformed / empty stdin — nothing to guard against.
         _allow()
 
     tool_name = data.get('tool_name', '')
@@ -262,4 +263,10 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception:
+        # Guard crashed — never block tool access due to guard bugs.
+        sys.exit(0)
