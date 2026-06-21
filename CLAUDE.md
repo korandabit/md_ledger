@@ -6,6 +6,13 @@ This tool provides token-efficient, structure-aware access to Markdown files thr
 
 ---
 
+## Session Start
+
+- Read `backlog-tickets/` for this project's open work queue — one `# CATALOG:`-blocked file per ticket (ADR-0011). Cross-project work-asks arrive here as native tickets (filed by the sender at send time).
+- The durable cross-project record is the monorepo dialog-log (`D:/Dropbox/_index/dialog-log/`), not local mail. The `inbox/` channel is retired (ADR-0013).
+
+---
+
 ## Core Principle
 
 **Always use md-ledger for Markdown files.** It provides:
@@ -347,14 +354,20 @@ md-ledger find-content "authorization" --context 1
 
 ## Limitations & Fallbacks
 
-**Known limitation:**
+**Known limitations:**
 - **`update` only works for ingested table rows**: `update ROW_ID` requires prior `ingest`, and `ingest` only processes markdown tables (header row + `| --- |` separator). Pipe-delimited data lines that aren't proper markdown tables are never ingested → no ROW_IDs → `update` can't reach them. Fix: either (a) extend `ingest` to handle pipe-delimited non-table sections, or (b) ensure pipe-delimited data uses proper markdown table format.
+- **`.txt` files now supported** via `--extensions txt` flag: `md-ledger index DIR --extensions txt`. Files with `#`-headers get real header rows. Flat-prose files (no headers) get a sentinel row (level=0) so they appear in `find-content` even with zero headers. Sentinel rows are filtered from `headers`, `find-section`, and `get_section_for_line` output. **Remaining gap:** `--flat-headers` mode for paragraph-level indexing of flat-prose files — not yet implemented.
+- **Prune for phantom rows — `gc` / `index --prune-missing` (implemented 2026-06-14).** `index` is add/update-only, so deleted or wrong-path files leave phantom rows that still surface in `find-section` / `find-content`. Drop them with `md-ledger gc` (use `--dry-run` to preview) or fold it into a reindex with `md-ledger index . --recursive --prune-missing`. A row is a phantom when `<db_dir>/<file>` does not resolve on disk; pruning keys on the file path, never on the internal `header_index.id` (which is not exposed by any command). The two mechanisms originally observed across the `D:/code` rotation (final audit 2026-05-27, all 11 projects):
+  1. **Vanished-file ghosts** — e.g. `.claude/worktrees/agent-<id>/...` paths from old Claude Code worktree sessions. Caught: deep_drafter 30 rows; essay_linter 499 rows across 64 ghost files; md_ledger itself 110 rows (older PHASE/AUDIT design docs).
+  2. **Wrong-path indexing** — file exists but was indexed from a subdirectory (e.g. running `md-ledger index` from inside `_posts/`), so the relative path stored in the ledger doesn't resolve from the directory where `ledger.db` lives. Caught: markkorandacom 880 rows (posts indexed at flat basenames + sibling-subdir entries); music_taste_engine 108 rows (`archive/<file>` files indexed at flat basenames); nlp-for-llm-corpus 2668 rows (mixed mechanisms). Every `find-section` hit on these files returns an unresolvable path.
+  **Rotation-wide total: 4295 phantom rows across 6 affected projects (70% concentrated in nlp-for-llm-corpus alone — corpus-heavy projects accumulate phantoms fastest).** Feature (a) — `gc` / `index --prune-missing` — now ships; run it per-project to clear residual phantoms. **Still open:** feature (b), an index-time warning when the `--db` parent dir differs from the index target's parent dir (signals indexing-from-wrong-cwd); and `--flat-headers` paragraph-level indexing (above).
 
 **md-ledger doesn't help when:**
 1. File < 50 lines → Just use Read
 2. Need full narrative flow → Read entire file
 3. Regex pattern matching → Use Grep
 4. File not indexed → Run `md-ledger index` first
+5. Content is in `.txt` files → Use Grep for content, Read for structure; watch for markdown-style headers that md-ledger can't see
 
 **Fallback to Grep:**
 ```bash
@@ -412,3 +425,11 @@ File modified, reindexing README.md...
 **Maintenance: Zero (auto-reindex)**
 
 Use this tool by default. Fall back to Read/Grep only when md-ledger doesn't apply.
+
+---
+
+## Historical moves
+
+| Date | What | Where to / why |
+|------|------|----------------|
+| 2026-06-21 | `inbox/` retired per ADR-0013 | → backlog + dialog-log; manifest in `_index/history/move-manifest_inbox-retire_md_ledger_2026-06-21.md` |
